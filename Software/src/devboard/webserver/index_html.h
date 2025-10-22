@@ -6,23 +6,7 @@
 #define INDEX_HTML_FOOTER R"rawliteral(</body></html>)rawliteral";
 
 #define COMMON_JAVASCRIPT \
-  R"rawliteral(
-<script>
-function askReboot() {
-  if (window.confirm('Are you sure you want to reboot the emulator? NOTE: If emulator is handling contactors, they will open during reboot!')) {
-    reboot();
-  }
-}
-function reboot() {
-  var xhr = new XMLHttpRequest();
-  xhr.open('GET', '/reboot', true);
-  xhr.send();
-  setTimeout(function() {
-    window.location = "/";
-  }, 3000);
-}
-</script>
-)rawliteral"
+  R"rawliteral(<script>function askReboot(){if(window.confirm('Are you sure you want to reboot the emulator? NOTE: If emulator is handling contactors, they will open during reboot!')){reboot();}}function reboot(){var xhr=new XMLHttpRequest();xhr.open('GET','/reboot',true);xhr.send();setTimeout(function(){window.location="/";},3000);}</script>)rawliteral"
 
 extern const char index_html[];
 extern const char index_html_header[];
