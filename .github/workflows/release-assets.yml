@@ -77,6 +77,16 @@ jobs:
         esptool --chip esp32 merge-bin -o .pio/build/stark_330/factory.bin --flash-mode dio --flash-freq 80m --flash-size 8MB 0x1000 .pio/build/stark_330/bootloader.bin 0x8000 .pio/build/stark_330/partitions.bin 0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 .pio/build/stark_330/firmware.bin
         mv .pio/build/stark_330/factory.bin output/BE_${{ steps.vars.outputs.tag }}_StarkCMR.factory.bin
 
+    - name: 🛠 Build ota image for ESP32-S3 DevKit
+      run: |
+        pio run -e esp32s3box
+        cp .pio/build/esp32s3box/firmware.bin output/BE_${{ steps.vars.outputs.tag }}_ESP32-S3-DevKit.ota.bin
+
+    - name: 🛠 Build factory image for ESP32-S3 DevKit
+      run: |
+        esptool --chip esp32s3 merge-bin -o .pio/build/esp32s3box/factory.bin --flash-mode dio --flash-freq 80m --flash-size 4MB 0x0000 .pio/build/esp32s3box/bootloader.bin 0x8000 .pio/build/esp32s3box/partitions.bin 0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 .pio/build/esp32s3box/firmware.bin
+        mv .pio/build/esp32s3box/factory.bin output/BE_${{ steps.vars.outputs.tag }}_ESP32-S3-DevKit.factory.bin
+
     - name: 🌐 Deploy to Web Installer repo
       env:
         WEB_INSTALLER_PUSH_TOKEN: ${{ secrets.WEB_INSTALLER_PUSH_TOKEN }}
