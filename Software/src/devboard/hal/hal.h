@@ -1,7 +1,9 @@
 #ifndef _HAL_H_
 #define _HAL_H_
 
+#ifndef UNIT_TEST
 #include <driver/gpio.h>
+#endif
 #include <chrono>
 #include <unordered_map>
 #include <vector>
