@@ -6,6 +6,7 @@
 extern bool use_canfd_as_can;
 extern uint8_t user_selected_can_addon_crystal_frequency_mhz;
 extern uint8_t user_selected_canfd_addon_crystal_frequency_mhz;
+extern uint16_t user_selected_CAN_ID_cutoff_filter;
 
 void dump_can_frame(CAN_frame& frame, CAN_Interface interface, frameDirection msgDir);
 void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface interface);
@@ -20,6 +21,7 @@ typedef struct {
   CAN_Interface battery;
   CAN_Interface inverter;
   CAN_Interface battery_double;
+  CAN_Interface battery_triple;
   CAN_Interface charger;
   CAN_Interface shunt;
 } CAN_Configuration;

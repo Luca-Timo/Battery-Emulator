@@ -406,14 +406,47 @@ char* dayOfYearToDate(int year, int dayOfYear) {
   int month = 0;
 
   // Find the month and the day within the month
-  while (dayOfYear > daysInMonth[month]) {
+  while (month < 12 && dayOfYear > daysInMonth[month]) {
     dayOfYear -= daysInMonth[month];
     month++;
   }
 
+  // Ensure month is in valid range [0, 11]
+  if (month >= 12) {
+    month = 11;
+    dayOfYear = daysInMonth[11];  // Set to last day of December
+  }
+
+  // Ensure day is in valid range [1, daysInMonth[month]]
+  if (dayOfYear < 1) {
+    dayOfYear = 1;
+  } else if (dayOfYear > daysInMonth[month]) {
+    dayOfYear = daysInMonth[month];
+  }
+
   static char dateString[11];  // For "YYYY-MM-DD\0"
+
+  // Clamp values to ensure they fit in the expected number of digits
+  int safeYear = year % 10000;
+  if (safeYear < 0)
+    safeYear = 0;
+  if (safeYear > 9999)
+    safeYear = 9999;
+
+  int safeMonth = month + 1;
+  if (safeMonth < 1)
+    safeMonth = 1;
+  if (safeMonth > 12)
+    safeMonth = 12;
+
+  int safeDay = dayOfYear;
+  if (safeDay < 1)
+    safeDay = 1;
+  if (safeDay > 31)
+    safeDay = 31;
+
   // Format the date string in "YYYY-MM-DD" format
-  snprintf(dateString, sizeof(dateString), "%d-%02d-%02d", year, month + 1, dayOfYear);
+  snprintf(dateString, sizeof(dateString), "%04d-%02d-%02d", safeYear, safeMonth, safeDay);
   return dateString;
 }
 
@@ -471,6 +504,14 @@ void TeslaBattery::
 
   /* Value mapping is completed. Start to check all safeties */
 
+  //12V battery too low for contactor operation. Inform user via Event
+  if (battery_dcdcLvBusVolt > 0) {  //If value has been read
+    if ((battery_dcdcLvBusVolt * 0.0390625) < 11.7) {
+      set_event(EVENT_12V_LOW, 0);
+    } else {
+      clear_event(EVENT_12V_LOW);
+    }
+  }
   //INTERNAL_OPEN_FAULT - Someone disconnected a high voltage cable while battery was in use
   if (battery_hvil_status == 3) {
     set_event(EVENT_INTERNAL_OPEN_FAULT, 0);
@@ -799,7 +840,7 @@ void TeslaBattery::
 
   //Safety checks for CAN message sending
   if ((datalayer.system.status.inverter_allows_contactor_closing == true) &&
-      (datalayer.battery.status.bms_status != FAULT) && (!datalayer.system.settings.equipment_stop_active)) {
+      (datalayer.battery.status.bms_status != FAULT) && (!datalayer.system.info.equipment_stop_active)) {
     // Carry on: 0x221 DRIVE state & reset power down timer
     vehicleState = CAR_DRIVE;
     powerDownSeconds = 9;
@@ -1890,9 +1931,27 @@ void TeslaBattery::transmit_can(unsigned long currentMillis) {
     if (battery_contactor == 4) {  // Contactors closed
 
       // Frames to be sent only when contactors closed
-
+      if (timeToMux3A1) {
+        timeToMux3A1 = false;
+        TESLA_3A1.data.u8[0] = 0xC3;
+        TESLA_3A1.data.u8[1] = 0xFF;
+        TESLA_3A1.data.u8[2] = 0xFF;
+        TESLA_3A1.data.u8[3] = 0xFF;
+        TESLA_3A1.data.u8[4] = 0x3D;
+        TESLA_3A1.data.u8[5] = 0x00;
+      } else {  //!timeToMux3A1
+        TESLA_3A1.data.u8[0] = 0x08;
+        TESLA_3A1.data.u8[1] = 0x62;
+        TESLA_3A1.data.u8[2] = 0x0B;
+        TESLA_3A1.data.u8[3] = 0x18;
+        TESLA_3A1.data.u8[4] = 0x00;
+        TESLA_3A1.data.u8[5] = 0x28;
+        timeToMux3A1 = true;
+      }
+      TESLA_3A1.data.u8[6] = frame6_3A1[frameCounter_TESLA_3A1];
+      TESLA_3A1.data.u8[7] = frame7_3A1[frameCounter_TESLA_3A1];
       //0x3A1 VCFRONT_vehicleStatus, critical otherwise VCFRONT_MIA triggered
-      transmit_can_frame(&TESLA_3A1[frameCounter_TESLA_3A1]);
+      transmit_can_frame(&TESLA_3A1);
       frameCounter_TESLA_3A1 = (frameCounter_TESLA_3A1 + 1) % 16;
     }
 

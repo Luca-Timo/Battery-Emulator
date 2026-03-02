@@ -18,9 +18,20 @@
 #include <algorithm>
 #include <map>
 
+// The spare ESP32 SPI buses are called HSPI and VSPI, whereas on a ESP32S3
+// they are called FSPI and HSPI.
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+#define SPI2515_BUS HSPI
+#define SPI2517_BUS FSPI
+#else
+#define SPI2515_BUS VSPI
+#define SPI2517_BUS HSPI
+#endif
+
 volatile CAN_Configuration can_config = {.battery = CAN_NATIVE,
                                          .inverter = CAN_NATIVE,
                                          .battery_double = CAN_ADDON_MCP2515,
+                                         .battery_triple = CAN_ADDON_MCP2515,
                                          .charger = CAN_NATIVE,
                                          .shunt = CAN_NATIVE};
 
@@ -47,7 +58,7 @@ uint32_t init_native_can(CAN_Speed speed, gpio_num_t tx_pin, gpio_num_t rx_pin);
 ACAN_ESP32_Settings* settingsespcan = nullptr;
 
 static uint32_t QUARTZ_FREQUENCY;
-SPIClass SPI2515;
+SPIClass SPI2515(SPI2515_BUS);
 uint8_t user_selected_can_addon_crystal_frequency_mhz = 0;
 
 ACAN2515* can2515;
@@ -56,14 +67,14 @@ ACAN2515Settings* settings2515;
 static ACAN2515_Buffer16 gBuffer;
 
 static ACAN2517FDSettings::Oscillator quartz_fd_frequency;
-SPIClass SPI2517;
+SPIClass SPI2517(SPI2517_BUS);
 uint8_t user_selected_canfd_addon_crystal_frequency_mhz = 0;
 ACAN2517FD* canfd;
 ACAN2517FDSettings* settings2517;
 bool use_canfd_as_can = false;
-// Initialization functions
-
 bool native_can_initialized = false;
+//CAN logging filter settings
+uint16_t user_selected_CAN_ID_cutoff_filter = 0;  //Messages below this ID will not be logged in webserver
 
 bool init_CAN() {
 
@@ -224,7 +235,7 @@ bool init_CAN() {
     } else {
       logging.print("CAN-FD Configuration error 0x");
       logging.println(errorCode2517, HEX);
-      set_event(EVENT_CANMCP2517FD_INIT_FAILURE, (uint8_t)errorCode2517);
+      set_event(EVENT_CANMCP2518FD_INIT_FAILURE, (uint8_t)errorCode2517);
       return false;
     }
   }
@@ -399,7 +410,9 @@ void print_can_frame(CAN_frame frame, CAN_Interface interface, frameDirection ms
   }
 
   if (datalayer.system.info.can_logging_active) {  // If user clicked on CAN Logging page in webserver, start recording
-    dump_can_frame(frame, interface, msgDir);
+    if (frame.ID > user_selected_CAN_ID_cutoff_filter) {  //Only log the message if CAN ID is higher than user set value
+      dump_can_frame(frame, interface, msgDir);
+    }
   }
 }
 
@@ -446,7 +459,7 @@ void dump_can_frame(CAN_frame& frame, CAN_Interface interface, frameDirection ms
                      (int)(interface * 2) + (msgDir == MSG_RX ? 0 : 1));
 
   // Add ID and DLC
-  offset += snprintf(message_string + offset, message_string_size - offset, "%X [%u] ", frame.ID, frame.DLC);
+  offset += snprintf(message_string + offset, message_string_size - offset, "%lX [%u] ", frame.ID, frame.DLC);
 
   // Add data bytes
   for (uint8_t i = 0; i < frame.DLC; i++) {
@@ -490,7 +503,7 @@ void restart_can() {
 
   if (canfd) {
     SPI2517.begin();
-    canfd->begin(*settings2517, [] { can2515->isr(); });
+    canfd->begin(*settings2517, [] { canfd->isr(); });
   }
 }
 
