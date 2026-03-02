@@ -14,7 +14,7 @@
 void SolaxInverter::
     update_values() {  //This function maps all the values fetched from battery CAN to the correct CAN messages
   // If not receiveing any communication from the inverter, open contactors and return to battery announce state
-  if (millis() - LastFrameTime >= SolaxTimeout && !configured_ignore_contactors) {
+  if (millis() - LastFrameTime >= INTERVAL_2_S && !configured_ignore_contactors) {
     datalayer.system.status.inverter_allows_contactor_closing = false;
     STATE = BATTERY_ANNOUNCE;
   }
@@ -49,8 +49,9 @@ void SolaxInverter::
   //BMS_PackData
   SOLAX_1873.data.u8[0] = (uint8_t)datalayer.battery.status.voltage_dV;  // OK
   SOLAX_1873.data.u8[1] = (datalayer.battery.status.voltage_dV >> 8);
-  SOLAX_1873.data.u8[2] = (int8_t)datalayer.battery.status.current_dA;  // OK, Signed (Active current in Amps x 10)
-  SOLAX_1873.data.u8[3] = (datalayer.battery.status.current_dA >> 8);
+  SOLAX_1873.data.u8[2] =
+      (int8_t)datalayer.battery.status.reported_current_dA;  // OK, Signed (Active current in Amps x 10)
+  SOLAX_1873.data.u8[3] = (datalayer.battery.status.reported_current_dA >> 8);
   SOLAX_1873.data.u8[4] = (uint8_t)(datalayer.battery.status.reported_soc / 100);  //SOC (100.00%)
   //SOLAX_1873.data.u8[5] = //Seems like this is not required? Or shall we put SOC decimals here?
   SOLAX_1873.data.u8[6] = (uint8_t)(capped_remaining_capacity_Wh / 10);
@@ -120,71 +121,14 @@ void SolaxInverter::map_can_frame_to_variable(CAN_frame rx_frame) {
 
   if (rx_frame.ID == 0x1871) {
     datalayer.system.status.CAN_inverter_still_alive = CAN_STILL_ALIVE;
-  }
 
-  if (rx_frame.ID == 0x1871 && rx_frame.data.u8[0] == (0x01) ||
-      rx_frame.ID == 0x1871 && rx_frame.data.u8[0] == (0x02)) {
-    LastFrameTime = millis();
+    if ((rx_frame.data.u8[0] == (0x01)) || (rx_frame.data.u8[0] == (0x02))) {
+      LastFrameTime = millis();
 
-    if (configured_ignore_contactors) {
-      // Skip the state machine since we're not going to open/close contactors,
-      // and the Solax would otherwise wait forever for us to do so.
+      if (configured_ignore_contactors) {
+        // Skip the state machine since we're not going to open/close contactors,
+        // and the Solax would otherwise wait forever for us to do so.
 
-      datalayer.system.status.inverter_allows_contactor_closing = true;
-      SOLAX_1875.data.u8[4] = (0x01);  // Inform Inverter: Contactor 0=off, 1=on.
-      transmit_can_frame(&SOLAX_187E);
-      transmit_can_frame(&SOLAX_187A);
-      transmit_can_frame(&SOLAX_1872);
-      transmit_can_frame(&SOLAX_1873);
-      transmit_can_frame(&SOLAX_1874);
-      transmit_can_frame(&SOLAX_1875);
-      transmit_can_frame(&SOLAX_1876);
-      transmit_can_frame(&SOLAX_1877);
-      transmit_can_frame(&SOLAX_1878);
-      transmit_can_frame(&SOLAX_100A001);
-      return;
-    }
-
-    switch (STATE) {
-      case (BATTERY_ANNOUNCE):
-        logging.println("Solax Battery State: Announce");
-        datalayer.system.status.inverter_allows_contactor_closing = false;
-        SOLAX_1875.data.u8[4] = (0x00);  // Inform Inverter: Contactor 0=off, 1=on.
-        for (uint8_t i = 0; i < number_of_batteries; i++) {
-          transmit_can_frame(&SOLAX_187E);
-          transmit_can_frame(&SOLAX_187A);
-          transmit_can_frame(&SOLAX_1872);
-          transmit_can_frame(&SOLAX_1873);
-          transmit_can_frame(&SOLAX_1874);
-          transmit_can_frame(&SOLAX_1875);
-          transmit_can_frame(&SOLAX_1876);
-          transmit_can_frame(&SOLAX_1877);
-          transmit_can_frame(&SOLAX_1878);
-        }
-        transmit_can_frame(&SOLAX_100A001);  //BMS Announce
-        // Message from the inverter to proceed to contactor closing
-        // Byte 4 changes from 0 to 1
-        if (rx_frame.data.u64 == Contactor_Close_Payload)
-          STATE = WAITING_FOR_CONTACTOR;
-        break;
-
-      case (WAITING_FOR_CONTACTOR):
-        SOLAX_1875.data.u8[4] = (0x00);  // Inform Inverter: Contactor 0=off, 1=on.
-        transmit_can_frame(&SOLAX_187E);
-        transmit_can_frame(&SOLAX_187A);
-        transmit_can_frame(&SOLAX_1872);
-        transmit_can_frame(&SOLAX_1873);
-        transmit_can_frame(&SOLAX_1874);
-        transmit_can_frame(&SOLAX_1875);
-        transmit_can_frame(&SOLAX_1876);
-        transmit_can_frame(&SOLAX_1877);
-        transmit_can_frame(&SOLAX_1878);
-        transmit_can_frame(&SOLAX_1801);  // Announce that the battery will be connected
-        STATE = CONTACTOR_CLOSED;         // Jump to Contactor Closed State
-        logging.println("Solax Battery State: Contactor Closed");
-        break;
-
-      case (CONTACTOR_CLOSED):
         datalayer.system.status.inverter_allows_contactor_closing = true;
         SOLAX_1875.data.u8[4] = (0x01);  // Inform Inverter: Contactor 0=off, 1=on.
         transmit_can_frame(&SOLAX_187E);
@@ -196,13 +140,69 @@ void SolaxInverter::map_can_frame_to_variable(CAN_frame rx_frame) {
         transmit_can_frame(&SOLAX_1876);
         transmit_can_frame(&SOLAX_1877);
         transmit_can_frame(&SOLAX_1878);
-        // Message from the inverter to open contactor
-        // Byte 4 changes from 1 to 0
-        if (rx_frame.data.u64 == Contactor_Open_Payload) {
-          set_event(EVENT_INVERTER_OPEN_CONTACTOR, 0);
-          STATE = BATTERY_ANNOUNCE;
-        }
-        break;
+        transmit_can_frame(&SOLAX_100A001);
+        return;
+      }
+
+      switch (STATE) {
+        case (BATTERY_ANNOUNCE):
+          logging.println("Solax Battery State: Announce");
+          datalayer.system.status.inverter_allows_contactor_closing = false;
+          SOLAX_1875.data.u8[4] = (0x00);  // Inform Inverter: Contactor 0=off, 1=on.
+          for (uint8_t i = 0; i < number_of_batteries; i++) {
+            transmit_can_frame(&SOLAX_187E);
+            transmit_can_frame(&SOLAX_187A);
+            transmit_can_frame(&SOLAX_1872);
+            transmit_can_frame(&SOLAX_1873);
+            transmit_can_frame(&SOLAX_1874);
+            transmit_can_frame(&SOLAX_1875);
+            transmit_can_frame(&SOLAX_1876);
+            transmit_can_frame(&SOLAX_1877);
+            transmit_can_frame(&SOLAX_1878);
+          }
+          transmit_can_frame(&SOLAX_100A001);  //BMS Announce
+          // Message from the inverter to proceed to contactor closing
+          // Byte 4 changes from 0 to 1
+          if (rx_frame.data.u64 == Contactor_Close_Payload)
+            STATE = WAITING_FOR_CONTACTOR;
+          break;
+
+        case (WAITING_FOR_CONTACTOR):
+          SOLAX_1875.data.u8[4] = (0x00);  // Inform Inverter: Contactor 0=off, 1=on.
+          transmit_can_frame(&SOLAX_187E);
+          transmit_can_frame(&SOLAX_187A);
+          transmit_can_frame(&SOLAX_1872);
+          transmit_can_frame(&SOLAX_1873);
+          transmit_can_frame(&SOLAX_1874);
+          transmit_can_frame(&SOLAX_1875);
+          transmit_can_frame(&SOLAX_1876);
+          transmit_can_frame(&SOLAX_1877);
+          transmit_can_frame(&SOLAX_1878);
+          transmit_can_frame(&SOLAX_1801);  // Announce that the battery will be connected
+          STATE = CONTACTOR_CLOSED;         // Jump to Contactor Closed State
+          logging.println("Solax Battery State: Contactor Closed");
+          break;
+
+        case (CONTACTOR_CLOSED):
+          datalayer.system.status.inverter_allows_contactor_closing = true;
+          SOLAX_1875.data.u8[4] = (0x01);  // Inform Inverter: Contactor 0=off, 1=on.
+          transmit_can_frame(&SOLAX_187E);
+          transmit_can_frame(&SOLAX_187A);
+          transmit_can_frame(&SOLAX_1872);
+          transmit_can_frame(&SOLAX_1873);
+          transmit_can_frame(&SOLAX_1874);
+          transmit_can_frame(&SOLAX_1875);
+          transmit_can_frame(&SOLAX_1876);
+          transmit_can_frame(&SOLAX_1877);
+          transmit_can_frame(&SOLAX_1878);
+          // Message from the inverter to open contactor
+          // Byte 4 changes from 1 to 0
+          if (rx_frame.data.u64 == Contactor_Open_Payload) {
+            set_event(EVENT_INVERTER_OPEN_CONTACTOR, 0);
+            STATE = BATTERY_ANNOUNCE;
+          }
+          break;
+      }
     }
   }
 
@@ -221,13 +221,13 @@ bool SolaxInverter::setup(void) {  // Performs one time setup at startup
   if (user_selected_inverter_modules > 0) {
     configured_number_of_modules = user_selected_inverter_modules;
   } else {
-    configured_number_of_modules = NUMBER_OF_MODULES;
+    configured_number_of_modules = DEFAULT_NUMBER_OF_MODULES;
   }
 
   if (user_selected_inverter_battery_type > 0) {
     configured_battery_type = user_selected_inverter_battery_type;
   } else {
-    configured_battery_type = BATTERY_TYPE;
+    configured_battery_type = DEFAULT_BATTERY_TYPE;
   }
 
   configured_ignore_contactors = user_selected_inverter_ignore_contactors;

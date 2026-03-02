@@ -9,7 +9,7 @@
 
 #include <vector>
 
-enum class ShuntType { None = 0, BmwSbox = 1, Highest };
+enum class ShuntType { None = 0, BmwSbox = 1, Inverter = 2, Highest };
 
 class CanShunt : public Transmitter, CanReceiver {
  public:
@@ -41,7 +41,6 @@ class CanShunt : public Transmitter, CanReceiver {
 };
 
 extern CanShunt* shunt;
-
 extern std::vector<ShuntType> supported_shunt_types();
 extern const char* name_for_shunt_type(ShuntType type);
 extern ShuntType user_selected_shunt_type;

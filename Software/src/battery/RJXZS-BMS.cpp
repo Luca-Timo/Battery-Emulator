@@ -21,7 +21,7 @@ void RjxzsBms::update_values() {
   datalayer.battery.status.remaining_capacity_Wh = static_cast<uint32_t>(
       (static_cast<double>(datalayer.battery.status.real_soc) / 10000) * datalayer.battery.info.total_capacity_Wh);
 
-  datalayer.battery.status.soh_pptt;  // This BMS does not have a SOH% formula
+  //datalayer.battery.status.soh_pptt;  // This BMS does not have a SOH% formula
 
   datalayer.battery.status.voltage_dV = total_voltage;
 
@@ -78,9 +78,9 @@ void RjxzsBms::update_values() {
 
   datalayer.battery.info.number_of_cells = populated_cellvoltages;  // 1-192S
 
-  datalayer.battery.info.max_design_voltage_dV;  // Set according to cells?
+  //datalayer.battery.info.max_design_voltage_dV;  // TODO: Set according to cells?
 
-  datalayer.battery.info.min_design_voltage_dV;  // Set according to cells?
+  //datalayer.battery.info.min_design_voltage_dV;  // TODO: Set according to cells?
 
   datalayer.battery.status.cell_max_voltage_mV = maximum_cell_voltage;
 
@@ -89,20 +89,6 @@ void RjxzsBms::update_values() {
 
 void RjxzsBms::handle_incoming_can_frame(CAN_frame rx_frame) {
 
-  /*
-  // All CAN messages recieved will be logged via serial
-  logging.print(millis());  // Example printout, time, ID, length, data: 7553  1DB  8  FF C0 B9 EA 0 0 2 5D
-  logging.print("  ");
-  logging.print(rx_frame.ID, HEX);
-  logging.print("  ");
-  logging.print(rx_frame.DLC);
-  logging.print("  ");
-  for (int i = 0; i < rx_frame.DLC; ++i) {
-    logging.print(rx_frame.data.u8[i], HEX);
-    logging.print(" ");
-  }
-  logging.println("");
-  */
   switch (rx_frame.ID) {
     case 0xF5:                 // This is the only message is sent from BMS
       setup_completed = true;  // Let the function know we no longer need to send startup messages
@@ -133,6 +119,11 @@ void RjxzsBms::handle_incoming_can_frame(CAN_frame rx_frame) {
         host_temperature = (rx_frame.data.u8[1] << 8) | rx_frame.data.u8[2];
         status_accounting = (rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4];
         equalization_starting_voltage = (rx_frame.data.u8[5] << 8) | rx_frame.data.u8[6];
+        if ((status_accounting & 0x020) >> 5) {  //balancing active
+          datalayer.battery.status.balancing_status = BALANCING_STATUS_ACTIVE;
+        } else {  //balancing off
+          datalayer.battery.status.balancing_status = BALANCING_STATUS_READY;
+        }
         if ((rx_frame.data.u8[4] & 0x40) >> 6) {
           charging_active = true;
           discharging_active = false;
@@ -143,13 +134,20 @@ void RjxzsBms::handle_incoming_can_frame(CAN_frame rx_frame) {
       } else if (mux >= 0x07 && mux <= 0x46) {
         // Cell voltages 1-192 (3 per message, 0x07=1-3, 0x08=4-6, ..., 0x46=190-192)
         int cell_index = (mux - 0x07) * 3;
+        bool has_valid_data = false;
         for (int i = 0; i < 3; i++) {
           if (cell_index + i >= MAX_AMOUNT_CELLS) {
             break;
           }
-          cellvoltages[cell_index + i] = (rx_frame.data.u8[1 + i * 2] << 8) | rx_frame.data.u8[2 + i * 2];
+          uint16_t cell_voltage = (rx_frame.data.u8[1 + i * 2] << 8) | rx_frame.data.u8[2 + i * 2];
+          cellvoltages[cell_index + i] = cell_voltage;
+          // Check if this cell has valid (non-zero) voltage data
+          if (cell_voltage != 0) {
+            has_valid_data = true;
+          }
         }
-        if (cell_index + 2 >= populated_cellvoltages) {
+        // Only update populated cell count if we received valid voltage data
+        if (has_valid_data && cell_index + 2 >= populated_cellvoltages) {
           populated_cellvoltages = cell_index + 2 + 1;
         }
       } else if (mux == 0x47) {
@@ -259,8 +257,10 @@ void RjxzsBms::transmit_can(unsigned long currentMillis) {
     }
 
     if (!setup_completed) {
-      transmit_can_frame(&RJXZS_10);  // Communication connected flag
-      transmit_can_frame(&RJXZS_1C);  // CAN OK
+      RJXZS_F4.data.u8[0] = 0x10;  // Communication connected flag
+      transmit_can_frame(&RJXZS_F4);
+      RJXZS_F4.data.u8[0] = 0x1C;  //CAN OK
+      transmit_can_frame(&RJXZS_F4);
     }
   }
 }

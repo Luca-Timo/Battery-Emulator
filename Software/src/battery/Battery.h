@@ -49,6 +49,12 @@ enum class BatteryType {
   RelionBattery = 41,
   RivianBattery = 42,
   BmwPhev = 43,
+  FordMachE = 44,
+  CmpSmartCar = 45,
+  ThinkCity = 47,
+  TeslaLegacy = 48,
+  GrowattHvArk = 49,
+  GeelySea = 50,
   Highest
 };
 
@@ -59,6 +65,7 @@ extern const char* name_for_comm_interface(comm_interface comm);
 
 extern BatteryType user_selected_battery_type;
 extern bool user_selected_second_battery;
+extern bool user_selected_triple_battery;
 
 extern battery_chemistry_enum user_selected_battery_chemistry;
 
@@ -90,9 +97,11 @@ class Battery {
   virtual bool supports_manual_balancing() { return false; }
   virtual bool supports_real_BMS_status() { return false; }
   virtual bool supports_toggle_SOC_method() { return false; }
+  virtual bool supports_energy_saving_mode_reset() { return false; }
   virtual bool supports_factory_mode_method() { return false; }
   virtual bool supports_chademo_restart() { return false; }
   virtual bool supports_chademo_stop() { return false; }
+  virtual bool supports_offline_balancing() { return false; }
 
   virtual void clear_isolation() {}
   virtual void reset_BMS() {}
@@ -107,9 +116,12 @@ class Battery {
   virtual void request_open_contactors() {}
   virtual void request_close_contactors() {}
   virtual void toggle_SOC_method() {}
+  virtual void reset_energy_saving_mode() {}
   virtual void set_factory_mode() {}
   virtual void chademo_restart() {}
   virtual void chademo_stop() {}
+  virtual void initiate_offline_balancing() {}
+  virtual void end_offline_balancing() {}
 
   virtual void set_fake_voltage(float v) {}
   virtual float get_voltage();

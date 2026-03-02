@@ -4,7 +4,8 @@
 #include "../charger/CanCharger.h"
 #include "../communication/can/comm_can.h"
 #include "../datalayer/datalayer.h"
-#include "../datalayer/datalayer_extended.h"  //For "More battery info" webpage
+#include "../datalayer/datalayer_extended.h"     //For "More battery info" webpage
+#include "../devboard/utils/common_functions.h"  //For CRC table
 #include "../devboard/utils/events.h"
 #include "../devboard/utils/logging.h"
 
@@ -193,6 +194,7 @@ void NissanLeafBattery::
     datalayer_nissan->temperature2 = ((Temp_fromRAW_to_F(battery_temp_raw_2) - 320) * 5) / 9;  //Convert from F to C
     datalayer_nissan->temperature3 = ((Temp_fromRAW_to_F(battery_temp_raw_3) - 320) * 5) / 9;  //Convert from F to C
     datalayer_nissan->temperature4 = ((Temp_fromRAW_to_F(battery_temp_raw_4) - 320) * 5) / 9;  //Convert from F to C
+#ifndef SMALL_FLASH_DEVICE
     datalayer_nissan->CryptoChallenge = incomingChallenge;
     datalayer_nissan->SolvedChallengeMSB =
         ((solvedChallenge[7] << 24) | (solvedChallenge[6] << 16) | (solvedChallenge[5] << 8) | solvedChallenge[4]);
@@ -205,6 +207,8 @@ void NissanLeafBattery::
       stateMachineClearSOH = 0;  //Start the statemachine
       datalayer_nissan->UserRequestSOHreset = false;
     }
+
+#endif
   }
 }
 
@@ -316,6 +320,7 @@ void NissanLeafBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       break;
     case 0x7BB:
 
+#ifndef SMALL_FLASH_DEVICE
       // This section checks if we are doing a SOH reset towards BMS. If we do, all 7BB handling is halted
       if (stateMachineClearSOH < 255) {
         //Intercept the messages based on state machine
@@ -330,6 +335,7 @@ void NissanLeafBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
         }
         break;
       }
+#endif
 
       if (stop_battery_query) {  //Leafspy is active, stop our own polling
         break;
@@ -558,7 +564,7 @@ void NissanLeafBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
 
 void NissanLeafBattery::transmit_can(unsigned long currentMillis) {
 
-  if (datalayer.system.status.BMS_reset_in_progress || datalayer.system.status.BMS_startup_in_progress) {
+  if (datalayer.system.status.bms_reset_status != BMS_RESET_IDLE) {
     // Transmitting towards battery is halted while BMS is being reset
     previousMillis10 = currentMillis;
     previousMillis100 = currentMillis;
@@ -791,7 +797,7 @@ void NissanLeafBattery::transmit_can(unsigned long currentMillis) {
 uint8_t NissanLeafBattery::calculate_crc(CAN_frame& rx_frame) {
   uint8_t crc = 0;
   for (uint8_t j = 0; j < 7; j++) {
-    crc = crctable[(crc ^ static_cast<uint8_t>(rx_frame.data.u8[j])) % 256];
+    crc = crctable_nissan_leaf[(crc ^ static_cast<uint8_t>(rx_frame.data.u8[j])) % 256];
   }
   return crc;
 }
@@ -835,6 +841,7 @@ uint16_t Temp_fromRAW_to_F(uint16_t temperature) {  //This function feels horrib
 }
 
 void NissanLeafBattery::clearSOH(void) {
+#ifndef SMALL_FLASH_DEVICE
   stop_battery_query = true;
   hold_off_with_polling_10seconds = 10;  // Active battery polling is paused for 100 seconds
 
@@ -899,7 +906,10 @@ void NissanLeafBattery::clearSOH(void) {
     default:
       break;
   }
+#endif
 }
+
+#ifndef SMALL_FLASH_DEVICE
 
 unsigned int CyclicXorHash16Bit(unsigned int param_1, unsigned int param_2) {
   bool bVar1;
@@ -965,13 +975,13 @@ unsigned int CyclicXorHash16Bit(unsigned int param_1, unsigned int param_2) {
   return uVar10;
 }
 unsigned int ComputeMaskedXorProduct(unsigned int param_1, unsigned int param_2, unsigned int param_3) {
-  return (param_3 ^ 0x7F88 | param_2 ^ 0x8FE7) * ((param_1 & 0xffff) >> 8 ^ param_1 & 0xff) & 0xffff;
+  return ((param_3 ^ 0x7F88) | (param_2 ^ 0x8FE7)) * ((((param_1 & 0xffff) >> 8) ^ (param_1 & 0xff))) & 0xffff;
 }
 
 short ShortMaskedSumAndProduct(short param_1, short param_2) {
   unsigned short uVar1;
 
-  uVar1 = param_2 + param_1 * 0x0006 & 0xff;
+  uVar1 = (param_2 + (param_1 * 0x0006)) & 0xff;
   return (uVar1 + param_1) * (uVar1 + param_2);
 }
 
@@ -981,8 +991,8 @@ unsigned int MaskedBitwiseRotateMultiply(unsigned int param_1, unsigned int para
   param_1 = param_1 & 0xffff;
   param_2 = param_2 & 0xffff;
   uVar1 = param_2 & (param_1 | 0x0006) & 0xf;
-  return ((unsigned int)param_1 >> uVar1 | param_1 << (0x10 - uVar1 & 0x1f)) *
-             (param_2 << uVar1 | (unsigned int)param_2 >> (0x10 - uVar1 & 0x1f)) &
+  return ((unsigned int)param_1 >> uVar1 | param_1 << (0x10 - (uVar1 & 0x1f))) *
+             (param_2 << uVar1 | (unsigned int)param_2 >> (0x10 - (uVar1 & 0x1f))) &
          0xffff;
 }
 
@@ -1013,6 +1023,8 @@ void decodeChallengeData(unsigned int incomingChallenge, unsigned char* solvedCh
   solvedChallenge[7] = (unsigned char)((unsigned int)uVar1 >> 0x18);
   return;
 }
+
+#endif
 
 void NissanLeafBattery::setup(void) {  // Performs one time setup at startup
   strncpy(datalayer.system.info.battery_protocol, Name, 63);
